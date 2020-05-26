@@ -178,7 +178,7 @@ func (s *WindowPoStScheduler) checkRecoveries(ctx context.Context, deadline uint
 	return nil
 }
 
-func (s *WindowPoStScheduler) checkFaults(ctx context.Context, ssi []abi.SectorNumber) ([]abi.SectorNumber, error) {
+func (s *WindowPoStScheduler) checkFaults(ctx context.Context, ssi []abi.SectorNumber) (*abi.BitField, error) {
 	//faults := s.prover.Scrub(ssi)
 	log.Warnf("Stub checkFaults")
 
@@ -195,7 +195,13 @@ func (s *WindowPoStScheduler) checkFaults(ctx context.Context, ssi []abi.SectorN
 		}
 	}*/
 
-	return nil, nil
+	//return nil, nil
+	// filbugs: PR#1825
+	chainFaults, err := s.api.StateMinerFaults(ctx, s.actor, types.EmptyTSK)
+	if err != nil {
+		return nil, xerrors.Errorf("checking on-chain faults: %w", err)
+	}
+	return chainFaults, nil
 }
 
 func (s *WindowPoStScheduler) runPost(ctx context.Context, di miner.DeadlineInfo, ts *types.TipSet) (*miner.SubmitWindowedPoStParams, error) {
@@ -279,10 +285,28 @@ func (s *WindowPoStScheduler) runPost(ctx context.Context, di miner.DeadlineInfo
 	}
 
 	tsStart := time.Now()
-
+	fcount, _ := faults.Count()
 	log.Infow("generating windowPost",
 		"sectors", len(ssi),
-		"faults", len(faults))
+		"faults", fcount)
+
+	// The faults bitfield should already be a subset of the sectors bitfield.
+	faultMax := uint64(len(ssi))
+	if fcount > faultMax {
+		faultMax = fcount
+	}
+	faultSet, err := faults.AllMap(faultMax)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to expand faults: %w", err)
+	}
+
+	var postssi []abi.SectorInfo
+	for _, s := range ssi {
+		faulty := faultSet[uint64(s.SectorNumber)]
+		if !faulty {
+			postssi = append(postssi, s)
+		}
+	}
 
 	mid, err := address.IDFromAddress(s.actor)
 	if err != nil {
@@ -290,7 +314,7 @@ func (s *WindowPoStScheduler) runPost(ctx context.Context, di miner.DeadlineInfo
 	}
 
 	// TODO: Faults!
-	postOut, err := s.prover.GenerateWindowPoSt(ctx, abi.ActorID(mid), ssi, abi.PoStRandomness(rand))
+	postOut, err := s.prover.GenerateWindowPoSt(ctx, abi.ActorID(mid), postssi, abi.PoStRandomness(rand))
 	if err != nil {
 		return nil, xerrors.Errorf("running post failed: %w", err)
 	}
@@ -303,7 +327,7 @@ func (s *WindowPoStScheduler) runPost(ctx context.Context, di miner.DeadlineInfo
 	log.Infow("submitting window PoSt", "elapsed", elapsed)
 
 	return &miner.SubmitWindowedPoStParams{
-		Deadline: di.Index, // FILBUGS: PR#1825
+		Deadline: di.Index, // filbugs: PR#1825
 		Partitions: partitions,
 		Proofs:     postOut,
 		Skipped:    *abi.NewBitField(), // TODO: Faults here?
