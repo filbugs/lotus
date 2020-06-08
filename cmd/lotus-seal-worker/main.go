@@ -26,7 +26,7 @@ import (
 	lcli "github.com/filecoin-project/lotus/cli"
 	"github.com/filecoin-project/lotus/lib/lotuslog"
 	"github.com/filecoin-project/lotus/node/repo"
-	"github.com/filecoin-project/sector-storage"
+	sectorstorage "github.com/filecoin-project/sector-storage"
 	"github.com/filecoin-project/sector-storage/sealtasks"
 	"github.com/filecoin-project/sector-storage/stores"
 )
@@ -146,7 +146,7 @@ var runCmd = &cli.Command{
 		}
 
 		if cctx.Bool("commit") {
-			if err := paramfetch.GetParams(build.ParametersJson(), uint64(ssize)); err != nil {
+			if err := paramfetch.GetParams(ctx, build.ParametersJson(), uint64(ssize)); err != nil {
 				return xerrors.Errorf("get params: %w", err)
 			}
 		}
@@ -290,7 +290,7 @@ var runCmd = &cli.Command{
 
 		go func() {
 			<-ctx.Done()
-			log.Warn("Shutting down..")
+			log.Warn("Shutting down...")
 			if err := srv.Shutdown(context.TODO()); err != nil {
 				log.Errorf("shutting down RPC server failed: %s", err)
 			}
